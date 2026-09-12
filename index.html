@@ -1,0 +1,776 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Arrow Beat</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; height: 100%;
+    background: radial-gradient(circle at 50% 0%, #2a1b4d, #0d0a1a 70%);
+    color: #fff;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: manipulation;
+  }
+  #app {
+    height: 100%; max-width: 520px; margin: 0 auto;
+    display: flex; flex-direction: column;
+    padding: 12px 16px 20px;
+  }
+  #hud {
+    display: grid; grid-template-columns: 1fr auto 1fr; align-items: end;
+    font-weight: 700; padding: 4px 4px 8px; gap: 8px;
+  }
+  #hud .label { font-size: 11px; opacity: .6; letter-spacing: .08em; text-transform: uppercase; display: block; }
+  #hud .val { font-size: 22px; font-variant-numeric: tabular-nums; }
+  #levelName { font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .bars { display: flex; flex-direction: column; gap: 5px; padding: 0 4px 12px; }
+  .healthRow { display: flex; align-items: center; gap: 10px; }
+  .healthRow .bar { flex: 1; }
+  #lives { font-size: 18px; letter-spacing: 2px; color: #ff4d6d; white-space: nowrap; line-height: 1; }
+  #lives .lost { color: rgba(255,255,255,.2); }
+  #lives.bump { animation: bump .4s ease-out; }
+  @keyframes bump { 40% { scale: 1.35; } }
+  #board.hurt { animation: hurt .5s ease-out; }
+  @keyframes hurt { 0%, 40% { box-shadow: inset 0 0 0 4px #ff3b5c, inset 0 0 60px rgba(255,59,92,.6); } }
+  .bar { height: 10px; border-radius: 99px; background: rgba(255,255,255,.1); overflow: hidden; }
+  .bar.thin { height: 4px; }
+  .bar > div { height: 100%; width: 0; border-radius: 99px; transition: width .15s, background .3s; }
+  #health { background: #7dff6b; }
+  #progress { background: rgba(255,255,255,.5); transition: none; }
+
+  #board {
+    flex: 1; position: relative;
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;
+    border-radius: 18px; overflow: hidden;
+  }
+  .lane {
+    position: relative; overflow: hidden;
+    background: linear-gradient(to bottom, rgba(255,255,255,.02), rgba(255,255,255,.06));
+    border-radius: 14px;
+  }
+  .lane.flash { background: linear-gradient(to bottom, rgba(255,255,255,.02), color-mix(in srgb, var(--c) 35%, transparent)); }
+
+  .note, .btn {
+    position: absolute; left: 50%;
+    width: min(84%, 90px); aspect-ratio: 1;
+    border-radius: 16px;
+    display: grid; place-items: center;
+    font-size: clamp(26px, 7vw, 40px); font-weight: 900;
+  }
+  .note {
+    top: 0;
+    background: var(--c);
+    color: #0d0a1a;
+    box-shadow: 0 0 18px color-mix(in srgb, var(--c) 70%, transparent);
+    will-change: transform;
+    z-index: 1;
+  }
+  /* Notes that must be pressed together get a white ring */
+  .note.chord {
+    box-shadow: inset 0 0 0 4px #fff, 0 0 22px #fff;
+  }
+  .note .tail {
+    position: absolute; left: 50%; bottom: calc(100% - 6px);
+    width: 42%; transform: translateX(-50%);
+    background: linear-gradient(to top, var(--c), color-mix(in srgb, var(--c) 40%, transparent));
+    border-radius: 10px 10px 0 0;
+  }
+  .note.holding { animation: pulse .25s ease-in-out infinite alternate; }
+  @keyframes pulse { to { filter: brightness(1.4); } }
+  .note.hit { animation: pop .22s ease-out forwards; }
+  .note.missed { opacity: .25; filter: grayscale(1); }
+  @keyframes pop { to { opacity: 0; scale: 1.6; } }
+
+  .btn {
+    bottom: 22px; transform: translateX(-50%);
+    border: 4px solid var(--c);
+    color: var(--c);
+    background: rgba(13,10,26,.6);
+    cursor: pointer;
+    transition: transform .06s, background .06s;
+    z-index: 2;
+  }
+  .btn.down {
+    transform: translateX(-50%) scale(.9);
+    background: color-mix(in srgb, var(--c) 45%, transparent);
+    color: #fff;
+  }
+
+  .feedback {
+    position: absolute; left: 0; right: 0; bottom: 140px;
+    text-align: center; font-weight: 900; font-size: 13px;
+    letter-spacing: .05em;
+    pointer-events: none; z-index: 3;
+    animation: rise .6s ease-out forwards;
+  }
+  @keyframes rise {
+    from { opacity: 1; translate: 0 0; }
+    to { opacity: 0; translate: 0 -40px; }
+  }
+
+  #overlay {
+    position: absolute; inset: 0; z-index: 10;
+    display: flex; overflow-y: auto;
+    background: rgba(8,6,18,.88); backdrop-filter: blur(4px);
+    border-radius: 18px; text-align: center; padding: 20px;
+  }
+  #overlay[hidden] { display: none; }
+  #overlay > div { margin: auto; width: 100%; }
+  #overlay h1 { font-size: 38px; margin: 0 0 4px; letter-spacing: -.02em; }
+  #overlay p { opacity: .8; line-height: 1.5; margin: 0 0 16px; }
+  #overlay .keys { font-size: 26px; letter-spacing: 10px; margin-bottom: 14px; }
+  .cta {
+    font: inherit; font-weight: 800; font-size: 17px;
+    padding: 12px 26px; border-radius: 999px; border: 0;
+    background: linear-gradient(90deg, #ff4d8d, #ffb84d); color: #1a0f2e;
+    cursor: pointer; margin: 4px;
+  }
+  .cta.ghost { background: rgba(255,255,255,.12); color: #fff; }
+  .cta:hover { filter: brightness(1.1); }
+  .levels { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; text-align: left; }
+  .lvl {
+    font: inherit; color: #fff; text-align: left; cursor: pointer;
+    background: rgba(255,255,255,.07); border: 2px solid rgba(255,255,255,.12);
+    border-radius: 12px; padding: 9px 11px;
+    display: grid; grid-template-columns: auto 1fr; column-gap: 9px; align-items: center;
+  }
+  .lvl:hover:not(:disabled) { border-color: #ffb84d; background: rgba(255,184,77,.12); }
+  .lvl:disabled { opacity: .35; cursor: not-allowed; }
+  .lvl .num { grid-row: span 2; font-size: 22px; font-weight: 900; width: 30px; text-align: center; }
+  .lvl .name { font-weight: 800; font-size: 14px; }
+  .lvl .meta { font-size: 12px; opacity: .7; }
+  .grade { font-weight: 900; color: #fff36b; }
+  .stats { font-size: 16px; margin-bottom: 18px; line-height: 1.7; }
+  .bigGrade { font-size: 72px; font-weight: 900; line-height: 1; margin: 6px 0; }
+
+  #banner {
+    position: absolute; top: 26%; left: 16px; right: 16px; text-align: center;
+    z-index: 5; pointer-events: none; opacity: 0;
+    text-shadow: 0 2px 16px rgba(0,0,0,.8);
+  }
+  #banner .b1 { font-size: 16px; font-weight: 800; opacity: .8; letter-spacing: .1em; }
+  #banner .b2 { font-size: 36px; font-weight: 900; }
+  #banner .b3 { font-size: 16px; font-weight: 600; color: #ffb84d; margin-top: 6px; }
+  #banner.show { animation: banner 2.6s ease-out; }
+  @keyframes banner {
+    0% { opacity: 0; scale: .7; }
+    12% { opacity: 1; scale: 1.05; }
+    20% { scale: 1; }
+    80% { opacity: 1; }
+    100% { opacity: 0; }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="hud">
+    <div><span class="label">Score</span><span class="val" id="score">0</span></div>
+    <div style="text-align:center"><span class="label">Combo</span><span class="val" id="combo">0</span></div>
+    <div style="text-align:right;min-width:0"><span class="label" id="levelNum">Level</span><span id="levelName">—</span></div>
+  </div>
+  <div class="bars">
+    <div class="healthRow">
+      <div class="bar"><div id="health"></div></div>
+      <span id="lives"></span>
+    </div>
+    <div class="bar thin"><div id="progress"></div></div>
+  </div>
+
+  <div id="board">
+    <div id="banner"><div class="b1"></div><div class="b2"></div><div class="b3"></div></div>
+    <div id="overlay"><div id="overlayContent"></div></div>
+  </div>
+</div>
+
+<script>
+(() => {
+  const LANES = [
+    { key: 'ArrowLeft',  symbol: '←', color: '#ff4d8d', freq: 261.63 },
+    { key: 'ArrowDown',  symbol: '↓', color: '#4dd2ff', freq: 329.63 },
+    { key: 'ArrowUp',    symbol: '↑', color: '#7dff6b', freq: 392.00 },
+    { key: 'ArrowRight', symbol: '→', color: '#ffb84d', freq: 523.25 },
+  ];
+
+  // Each level: tempo, how long notes take to fall, and weighted pattern pool.
+  const LEVELS = [
+    { name: 'Warm Up',       bpm: 90,  travel: 1700, tip: 'Hit each arrow on the beat.',
+      patterns: { quarters: 4, rest: 1 } },
+    { name: 'On Beat',       bpm: 100, travel: 1600, tip: 'Eighth notes: twice as many!',
+      patterns: { quarters: 2, eighths: 3 } },
+    { name: 'Stairway',      bpm: 110, travel: 1500, tip: 'Follow the staircase patterns.',
+      patterns: { eighths: 2, stairs: 3, quarters: 1 } },
+    { name: 'Double Up',     bpm: 110, travel: 1450, tip: 'NEW: White rings = press 2 arrows at once!',
+      patterns: { chord: 3, quarters: 1, stairs: 1, eighths: 1 } },
+    { name: 'Hold On',       bpm: 120, travel: 1350, tip: 'NEW: Hold the key until the tail ends.',
+      patterns: { holdEasy: 3, chord: 1, eighths: 2 } },
+    { name: 'Rapid Fire',    bpm: 120, travel: 1300, tip: 'NEW: Hammer the same key rapidly!',
+      patterns: { jack: 3, burst: 2, eighths: 1, chord: 1 } },
+    { name: 'Trill Seeker',  bpm: 130, travel: 1200, tip: 'Alternate fast between two keys.',
+      patterns: { trill: 3, chordMix: 2, holdEasy: 1, stairs: 1 } },
+    { name: 'Juggler',       bpm: 135, travel: 1100, tip: 'Hold one arrow while tapping others.',
+      patterns: { hold: 3, chordMix: 2, jack: 1, trill: 1 } },
+    { name: 'Triple Threat', bpm: 145, travel: 1000, tip: 'NEW: Three arrows at once!',
+      patterns: { triple: 3, burst: 2, trill: 1, chordMix: 1, jack: 1 } },
+    { name: 'Final Boss',    bpm: 160, travel: 900,  tip: 'Everything. Fast. Good luck.',
+      patterns: { roll16: 2, triple: 2, hold: 2, jack: 2, trill: 2, chordMix: 2, burst: 2 } },
+  ];
+
+  const PERFECT = 45, GOOD = 95, OK = 150;   // hit windows (ms from exact time)
+  const SONG_SECONDS = 40;
+  const START_LIVES = 3, MAX_LIVES = 5;
+  const COMBO_FOR_LIFE = 50;                 // every 50-hit combo earns a life back
+  const GRADES = ['S', 'A', 'B', 'C', 'D'];
+
+  const $ = id => document.getElementById(id);
+  const board = $('board'), overlay = $('overlay'), overlayContent = $('overlayContent');
+
+  // ---------- Board ----------
+  const lanes = LANES.map((cfg, i) => {
+    const el = document.createElement('div');
+    el.className = 'lane';
+    el.style.setProperty('--c', cfg.color);
+    const btn = document.createElement('div');
+    btn.className = 'btn';
+    btn.textContent = cfg.symbol;
+    el.appendChild(btn);
+    btn.addEventListener('pointerdown', e => { e.preventDefault(); press(i); });
+    btn.addEventListener('pointerup', () => release(i));
+    btn.addEventListener('pointerleave', () => release(i));
+    board.insertBefore(el, $('banner'));
+    return { el, btn, cfg, isDown: false };
+  });
+
+  // ---------- Audio ----------
+  let actx = null;
+  function initAudio() {
+    if (!actx) {
+      try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch { actx = null; }
+    }
+    if (actx && actx.state === 'suspended') actx.resume();
+  }
+  const now = () => actx ? actx.currentTime * 1000 : performance.now();
+
+  function tone(freq, whenSec = 0, dur = 0.12, type = 'triangle', vol = 0.15) {
+    if (!actx) return;
+    const t = whenSec || actx.currentTime;
+    const o = actx.createOscillator(), g = actx.createGain();
+    o.type = type; o.frequency.value = freq;
+    g.gain.setValueAtTime(vol, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    o.connect(g).connect(actx.destination);
+    o.start(t); o.stop(t + dur + 0.02);
+  }
+  function kick(whenMs, accent) {
+    if (!actx) return;
+    const t = whenMs / 1000;
+    const o = actx.createOscillator(), g = actx.createGain();
+    o.frequency.setValueAtTime(accent ? 150 : 110, t);
+    o.frequency.exponentialRampToValueAtTime(40, t + 0.12);
+    g.gain.setValueAtTime(accent ? 0.5 : 0.3, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.15);
+    o.connect(g).connect(actx.destination);
+    o.start(t); o.stop(t + 0.17);
+  }
+  let noiseBuf = null;
+  function hat(whenMs) {
+    if (!actx) return;
+    if (!noiseBuf) {
+      const len = actx.sampleRate * 0.04;
+      noiseBuf = actx.createBuffer(1, len, actx.sampleRate);
+      const d = noiseBuf.getChannelData(0);
+      for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / len);
+    }
+    const src = actx.createBufferSource(), g = actx.createGain(), f = actx.createBiquadFilter();
+    f.type = 'highpass'; f.frequency.value = 7000;
+    g.gain.value = 0.08;
+    src.buffer = noiseBuf;
+    src.connect(f).connect(g).connect(actx.destination);
+    src.start(whenMs / 1000);
+  }
+
+  // ---------- Chart generation ----------
+  function mulberry32(a) {
+    return () => {
+      a |= 0; a = a + 0x6D2B79F5 | 0;
+      let t = Math.imul(a ^ a >>> 15, 1 | a);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+
+  // Patterns return notes within one measure: s = 16th-note step (0-15), hold = length in steps
+  function makePatterns(rng) {
+    const lane = () => Math.floor(rng() * 4);
+    const other = (...ex) => { const o = [0, 1, 2, 3].filter(l => !ex.includes(l)); return o[Math.floor(rng() * o.length)]; };
+    const pair = () => { const a = lane(); return [a, other(a)]; };
+    const trio = () => { const skip = lane(); return [0, 1, 2, 3].filter(l => l !== skip); };
+    const n = (s, ls, hold = 0) => [].concat(ls).map(l => ({ s, lane: l, hold }));
+
+    return {
+      rest: () => rng() < 0.5 ? [] : n(0, lane()),
+      quarters: () => { let p = -1; return [0, 4, 8, 12].flatMap(s => { p = other(p); return n(s, p); }); },
+      eighths: () => {
+        let p = -1; const out = [];
+        for (let s = 0; s < 16; s += 2) { if (s && rng() < 0.2) continue; p = other(p); out.push(...n(s, p)); }
+        return out;
+      },
+      stairs: () => {
+        const dir = rng() < 0.5 ? 1 : -1, start = lane();
+        return Array.from({ length: 8 }, (_, k) => n(k * 2, ((start + dir * k) % 4 + 4) % 4)).flat();
+      },
+      chord: () => [...n(0, pair()), ...n(4, lane()), ...n(8, pair()), ...n(12, rng() < 0.5 ? pair() : lane())],
+      chordMix: () => {
+        const out = [];
+        for (let s = 0; s < 16; s += 2) out.push(...n(s, s % 4 === 0 ? pair() : lane()));
+        return out;
+      },
+      // Rapid presses on the same key
+      jack: () => {
+        const a = lane(), b = other(a);
+        return [...n(0, a), ...n(1, a), ...n(2, a), ...n(3, a), ...n(6, other(a)),
+                ...n(8, b), ...n(9, b), ...n(10, b), ...n(11, b), ...n(14, other(b))];
+      },
+      // Fast roll across all four
+      burst: () => {
+        const r = rng() < 0.5 ? [0, 1, 2, 3] : [3, 2, 1, 0];
+        return [...r.flatMap((l, k) => n(k, l)), ...n(6, pair()),
+                ...[...r].reverse().flatMap((l, k) => n(8 + k, l)), ...n(14, lane())];
+      },
+      // Rapid alternation between two keys
+      trill: () => {
+        const [a, b] = pair(); const out = [];
+        for (let s = 0; s < 8; s++) out.push(...n(s, s % 2 ? b : a));
+        return [...out, ...n(10, pair()), ...n(12, lane()), ...n(14, lane())];
+      },
+      holdEasy: () => { const a = lane(); return [...n(0, a, 6), ...n(8, other(a)), ...n(12, pair())]; },
+      // Hold one key while tapping others
+      hold: () => {
+        const a = lane(), b = other(a);
+        return [...n(0, a, 12), ...n(2, b), ...n(4, other(a)), ...n(6, b), ...n(8, other(a)),
+                ...n(10, other(a, b)), ...n(14, pair())];
+      },
+      triple: () => [...n(0, trio()), ...n(4, lane()), ...n(6, lane()), ...n(8, trio()), ...n(12, pair()), ...n(14, lane())],
+      roll16: () => {
+        const seq = rng() < 0.5 ? [0, 1, 2, 3, 2, 1] : [3, 2, 1, 0, 1, 2];
+        return [...Array.from({ length: 12 }, (_, s) => n(s, seq[s % 6])).flat(), ...n(12, trio())];
+      },
+    };
+  }
+
+  function buildChart(idx) {
+    const L = LEVELS[idx];
+    const rng = mulberry32(7919 + idx * 977);  // same chart every time you play a level
+    const P = makePatterns(rng);
+    const entries = Object.entries(L.patterns);
+    const total = entries.reduce((a, [, w]) => a + w, 0);
+    const pick = () => { let r = rng() * total; for (const [k, w] of entries) if ((r -= w) < 0) return k; return entries[0][0]; };
+
+    const measures = Math.round(SONG_SECONDS / (240 / L.bpm));
+    const raw = [];
+    let last = null;
+    for (let m = 0; m < measures; m++) {
+      let k = pick();
+      if (k === last && entries.length > 1) k = pick();
+      last = k;
+      for (const e of P[k]()) raw.push({ step: (m + 1) * 16 + e.s, lane: e.lane, hold: e.hold });  // measure 0 = count-in
+    }
+    raw.sort((a, b) => a.step - b.step || a.lane - b.lane);
+
+    // Drop duplicates and anything overlapping a hold on the same lane
+    const busyUntil = [-1, -1, -1, -1], seen = new Set(), notes = [];
+    for (const e of raw) {
+      const key = e.step + ':' + e.lane;
+      if (seen.has(key) || e.step <= busyUntil[e.lane]) continue;
+      seen.add(key);
+      if (e.hold) busyUntil[e.lane] = e.step + e.hold;
+      notes.push(e);
+    }
+    const perStep = {};
+    notes.forEach(e => perStep[e.step] = (perStep[e.step] || 0) + 1);
+    notes.forEach(e => e.chord = perStep[e.step] > 1);
+    return { notes, measures };
+  }
+
+  // ---------- Progress ----------
+  let progress = { unlocked: 1, levels: {} };
+  try { progress = { ...progress, ...JSON.parse(localStorage.getItem('arrowBeatProgress') || '{}') }; } catch {}
+  const saveProgress = () => { try { localStorage.setItem('arrowBeatProgress', JSON.stringify(progress)); } catch {} };
+
+  // ---------- Game ----------
+  let state = null;
+
+  function startLevel(idx) {
+    initAudio();
+    if (state) state.running = false;
+    lanes.forEach(l => l.el.querySelectorAll('.note, .feedback').forEach(n => n.remove()));
+
+    const L = LEVELS[idx];
+    const stepMs = 60000 / L.bpm / 4;
+    const { notes, measures } = buildChart(idx);
+    const start = now() + 400;
+    const chart = notes.map(e => ({ ...e, time: start + e.step * stepMs, holdEnd: e.hold ? start + (e.step + e.hold) * stepMs : 0 }));
+    const lastEnd = Math.max(...chart.map(n => n.holdEnd || n.time));
+
+    state = {
+      running: true, idx, L, stepMs, start, chart,
+      next: 0, notes: [], audioStep: 0, songSteps: (measures + 1) * 16,
+      endTime: lastEnd + 900,
+      score: 0, combo: 0, maxCombo: 0, health: 100, lives: START_LIVES,
+      perfect: 0, good: 0, ok: 0, miss: 0, holds: 0,
+      held: [null, null, null, null],
+    };
+
+    overlay.hidden = true;
+    $('levelNum').textContent = `Level ${idx + 1}`;
+    $('levelName').textContent = L.name;
+    showBanner(`LEVEL ${idx + 1}`, L.name, L.tip);
+    updateHud();
+    requestAnimationFrame(loop);
+  }
+
+  function showBanner(a, b, c) {
+    const el = $('banner');
+    el.querySelector('.b1').textContent = a;
+    el.querySelector('.b2').textContent = b;
+    el.querySelector('.b3').textContent = c || '';
+    el.classList.remove('show'); void el.offsetWidth; el.classList.add('show');
+  }
+
+  function updateHud() {
+    $('score').textContent = state.score;
+    $('combo').textContent = state.combo;
+    const h = $('health');
+    h.style.width = state.health + '%';
+    h.style.background = state.health > 50 ? '#7dff6b' : state.health > 25 ? '#ffb84d' : '#ff4d5a';
+    renderLives(state.lives);
+  }
+
+  function renderLives(n) {
+    const shown = Math.max(START_LIVES, n);
+    $('lives').innerHTML = '♥'.repeat(n) + `<span class="lost">${'♥'.repeat(shown - n)}</span>`;
+  }
+
+  function bumpLives() {
+    const el = $('lives');
+    el.classList.remove('bump'); void el.offsetWidth; el.classList.add('bump');
+  }
+
+  function changeHealth(d) {
+    if (!state.running) return;
+    state.health = Math.max(0, Math.min(100, state.health + d));
+    if (state.health <= 0) return loseLife();
+    updateHud();
+  }
+
+  function loseLife() {
+    state.lives--;
+    bumpLives();
+    board.classList.remove('hurt'); void board.offsetWidth; board.classList.add('hurt');
+    if (state.lives <= 0) {
+      updateHud();
+      finish(false);
+      return;
+    }
+    state.health = 100;
+    updateHud();
+    showBanner('LIFE LOST', `${state.lives} ${state.lives === 1 ? 'life' : 'lives'} left`);
+    [392, 262].forEach((f, k) => tone(f, actx ? actx.currentTime + k * 0.12 : 0, 0.2, 'square', 0.08));
+  }
+
+  function gainLife() {
+    if (state.lives >= MAX_LIVES) return;
+    state.lives++;
+    bumpLives();
+    showBanner(`${state.combo} COMBO`, '+1 LIFE');
+    [659.25, 987.77].forEach((f, k) => tone(f, actx ? actx.currentTime + k * 0.08 : 0, 0.15));
+  }
+
+  function scheduleAudio(t) {
+    while (state.audioStep < state.songSteps && state.start + state.audioStep * state.stepMs < t + 150) {
+      const s = state.audioStep, when = state.start + s * state.stepMs;
+      if (when >= t - 20) {
+        if (s % 4 === 0) kick(when, s % 16 === 0);
+        else if (s % 4 === 2) hat(when);
+      }
+      state.audioStep++;
+    }
+  }
+
+  function spawn(c) {
+    const el = document.createElement('div');
+    el.className = 'note' + (c.chord ? ' chord' : '');
+    el.textContent = LANES[c.lane].symbol;
+    let tail = null;
+    if (c.hold) {
+      tail = document.createElement('div');
+      tail.className = 'tail';
+      el.appendChild(tail);
+    }
+    lanes[c.lane].el.appendChild(el);
+    state.notes.push({ ...c, el, tail, done: false, holding: false });
+  }
+
+  function feedback(lane, text, color) {
+    const f = document.createElement('div');
+    f.className = 'feedback';
+    f.textContent = text;
+    f.style.color = color;
+    lanes[lane].el.appendChild(f);
+    setTimeout(() => f.remove(), 600);
+  }
+
+  function removeNote(n, cls) {
+    n.done = true;
+    n.el.classList.add(cls);
+    setTimeout(() => n.el.remove(), cls === 'hit' ? 220 : 300);
+  }
+
+  function registerMiss(n, label = 'MISS') {
+    removeNote(n, 'missed');
+    state.miss++;
+    state.combo = 0;
+    feedback(n.lane, label, '#ff5a5a');
+    tone(110, 0, 0.2, 'sawtooth', 0.07);
+    changeHealth(-10);
+  }
+
+  function addScore(pts) {
+    state.score += Math.round(pts * (1 + Math.floor(state.combo / 10) * 0.5));
+  }
+
+  function press(i) {
+    const l = lanes[i];
+    if (l.isDown) return;
+    l.isDown = true;
+    l.btn.classList.add('down');
+    l.el.classList.add('flash');
+    if (!state || !state.running) return;
+
+    const t = now();
+    let target = null, bestDt = Infinity;
+    for (const n of state.notes) {
+      if (n.done || n.holding || n.lane !== i) continue;
+      const dt = Math.abs(n.time - t);
+      if (dt < bestDt) { bestDt = dt; target = n; }
+    }
+
+    if (!target || bestDt > OK) {
+      state.combo = 0;
+      state.score = Math.max(0, state.score - 10);
+      feedback(i, 'OOPS', '#aaa');
+      changeHealth(-3);
+      return;
+    }
+
+    let pts, label, color, heal;
+    if (bestDt <= PERFECT) { pts = 300; label = 'PERFECT'; color = '#fff36b'; heal = 2; state.perfect++; }
+    else if (bestDt <= GOOD) { pts = 150; label = 'GOOD'; color = '#7dff6b'; heal = 1; state.good++; }
+    else { pts = 50; label = 'OK'; color = '#4dd2ff'; heal = 0; state.ok++; }
+
+    state.combo++;
+    state.maxCombo = Math.max(state.maxCombo, state.combo);
+    if (state.combo % COMBO_FOR_LIFE === 0) gainLife();
+    addScore(pts);
+    feedback(i, label, color);
+    tone(l.cfg.freq);
+
+    if (target.hold) {
+      target.holding = true;
+      target.el.classList.add('holding');
+      state.held[i] = target;
+    } else {
+      removeNote(target, 'hit');
+    }
+    changeHealth(heal);
+  }
+
+  function release(i) {
+    const l = lanes[i];
+    if (!l.isDown) return;
+    l.isDown = false;
+    l.btn.classList.remove('down');
+    l.el.classList.remove('flash');
+    if (!state || !state.running) return;
+    const n = state.held[i];
+    if (!n) return;
+    state.held[i] = null;
+    if (now() < n.holdEnd - 120) registerMiss(n, 'DROPPED');
+    else completeHold(n);
+  }
+
+  function completeHold(n) {
+    state.held[n.lane] = null;
+    removeNote(n, 'hit');
+    state.holds++;
+    addScore(200);
+    feedback(n.lane, 'HOLD!', '#ff9dff');
+    tone(LANES[n.lane].freq * 2, 0, 0.12);
+    changeHealth(2);
+  }
+
+  function loop() {
+    if (!state.running) return;
+    const t = now();
+    scheduleAudio(t);
+
+    while (state.next < state.chart.length && state.chart[state.next].time - state.L.travel <= t + 16) {
+      spawn(state.chart[state.next++]);
+    }
+
+    const laneH = lanes[0].el.clientHeight;
+    const noteH = lanes[0].btn.offsetHeight;
+    const targetTop = laneH - 22 - noteH;          // top of note when it sits on the button
+    const pxPerMs = (targetTop + noteH) / state.L.travel;
+
+    for (const n of state.notes) {
+      if (n.done) continue;
+      if (n.holding) {
+        if (t >= n.holdEnd) { completeHold(n); continue; }
+        n.el.style.transform = `translate(-50%, ${targetTop}px)`;
+        n.tail.style.height = Math.max(0, (n.holdEnd - t) * pxPerMs - noteH / 2) + 'px';
+        continue;
+      }
+      n.el.style.transform = `translate(-50%, ${targetTop - (n.time - t) * pxPerMs}px)`;
+      if (n.tail) n.tail.style.height = Math.max(0, (n.holdEnd - n.time) * pxPerMs - noteH / 2) + 'px';
+      if (t - n.time > OK) {
+        registerMiss(n);
+        if (!state.running) return;
+      }
+    }
+    state.notes = state.notes.filter(n => !n.done);
+
+    $('progress').style.width = Math.min(100, (t - state.start) / (state.endTime - state.start) * 100) + '%';
+
+    if (state.next >= state.chart.length && state.notes.length === 0 && t >= state.endTime) {
+      finish(true);
+      return;
+    }
+    requestAnimationFrame(loop);
+  }
+
+  function accuracy() {
+    const total = state.perfect + state.good + state.ok + state.miss;
+    return total ? ((state.perfect + state.good * 0.7 + state.ok * 0.3) / total) * 100 : 0;
+  }
+
+  function gradeFor(acc) {
+    return acc >= 95 ? 'S' : acc >= 88 ? 'A' : acc >= 75 ? 'B' : acc >= 60 ? 'C' : 'D';
+  }
+
+  function finish(cleared) {
+    state.running = false;
+    const acc = accuracy();
+    const grade = cleared ? gradeFor(acc) : 'F';
+    const { idx } = state;
+    let newBest = false;
+
+    if (cleared) {
+      progress.unlocked = Math.max(progress.unlocked, Math.min(LEVELS.length, idx + 2));
+      const prev = progress.levels[idx] || { score: 0, grade: null };
+      newBest = state.score > prev.score;
+      progress.levels[idx] = {
+        score: Math.max(prev.score, state.score),
+        grade: !prev.grade || GRADES.indexOf(grade) < GRADES.indexOf(prev.grade) ? grade : prev.grade,
+      };
+      saveProgress();
+      [523.25, 659.25, 783.99, 1046.5].forEach((f, k) => tone(f, actx ? actx.currentTime + k * 0.09 : 0, 0.2));
+    } else {
+      lanes.forEach(l => l.el.querySelectorAll('.note').forEach(n => n.classList.add('missed')));
+      [300, 220, 150].forEach((f, k) => tone(f, actx ? actx.currentTime + k * 0.15 : 0, 0.25, 'sawtooth', 0.08));
+    }
+
+    const hasNext = cleared && idx < LEVELS.length - 1;
+    const allDone = cleared && idx === LEVELS.length - 1;
+    overlayContent.innerHTML = `
+      <h1>${allDone ? 'YOU BEAT THE GAME!' : cleared ? 'Level Cleared!' : 'Failed'}</h1>
+      <p style="margin:0">Level ${idx + 1}: ${LEVELS[idx].name}</p>
+      <div class="bigGrade" style="color:${cleared ? '#fff36b' : '#ff5a5a'}">${grade}</div>
+      <div class="stats">
+        ${newBest ? '<b style="color:#fff36b">NEW BEST!</b><br>' : ''}
+        Score: <b>${state.score}</b> · Accuracy: <b>${acc.toFixed(1)}%</b><br>
+        Max combo: <b>${state.maxCombo}</b> · Lives left: <b style="color:#ff4d6d">${'♥'.repeat(state.lives) || '0'}</b><br>
+        <span style="font-size:13px;opacity:.7">Perfect ${state.perfect} · Good ${state.good} · OK ${state.ok} · Holds ${state.holds} · Miss ${state.miss}</span>
+      </div>
+      ${hasNext ? `<button class="cta" data-act="next">Next Level ▶</button>` : ''}
+      <button class="cta ${hasNext ? 'ghost' : ''}" data-act="retry">Retry</button>
+      <button class="cta ghost" data-act="menu">Levels</button>
+      <p style="margin:14px 0 0;font-size:12px;opacity:.55">Enter = ${hasNext ? 'next' : 'retry'} · Esc = levels</p>`;
+    overlayContent.dataset.screen = 'results';
+    overlayContent.dataset.enter = hasNext ? 'next' : 'retry';
+    overlay.hidden = false;
+  }
+
+  function showMenu() {
+    if (state) {
+      state.running = false;
+      lanes.forEach(l => l.el.querySelectorAll('.note, .feedback').forEach(n => n.remove()));
+    }
+    overlayContent.innerHTML = `
+      <h1>Arrow Beat</h1>
+      <div class="keys">← ↓ ↑ →</div>
+      <p style="font-size:14px">Press the matching arrow key (or tap the button) when a note lands on it.<br>
+        Clear a level to unlock the next one.</p>
+      <div class="levels">
+        ${LEVELS.map((L, i) => {
+          const locked = i + 1 > progress.unlocked;
+          const rec = progress.levels[i];
+          const meta = locked ? '🔒 Locked'
+            : rec ? `<span class="grade">${rec.grade}</span> · ${rec.score} · ${L.bpm} BPM`
+            : `${L.bpm} BPM`;
+          return `<button class="lvl" data-level="${i}" ${locked ? 'disabled' : ''}>
+            <span class="num">${i + 1}</span><span class="name">${L.name}</span><span class="meta">${meta}</span>
+          </button>`;
+        }).join('')}
+      </div>
+      <p style="margin:14px 0 0;font-size:12px;opacity:.55">Enter = play level ${progress.unlocked} · Esc during a level = quit</p>`;
+    overlayContent.dataset.screen = 'menu';
+    overlay.hidden = false;
+    $('levelName').textContent = '—';
+    $('levelNum').textContent = 'Level';
+    $('health').style.width = '0';
+    $('lives').innerHTML = '';
+    $('progress').style.width = '0';
+  }
+
+  overlayContent.addEventListener('click', e => {
+    const lvl = e.target.closest('[data-level]');
+    if (lvl && !lvl.disabled) return startLevel(+lvl.dataset.level);
+    const act = e.target.closest('[data-act]')?.dataset.act;
+    if (act) doAction(act);
+  });
+
+  function doAction(act) {
+    if (act === 'next') startLevel(state.idx + 1);
+    else if (act === 'retry') startLevel(state.idx);
+    else if (act === 'menu') showMenu();
+  }
+
+  const keyToLane = Object.fromEntries(LANES.map((l, i) => [l.key, i]));
+  window.addEventListener('keydown', e => {
+    if (e.key in keyToLane) {
+      e.preventDefault();
+      if (!e.repeat) press(keyToLane[e.key]);
+    } else if (e.key === 'Escape') {
+      showMenu();
+    } else if ((e.key === 'Enter' || e.key === ' ') && !overlay.hidden) {
+      e.preventDefault();
+      if (overlayContent.dataset.screen === 'menu') startLevel(progress.unlocked - 1);
+      else doAction(overlayContent.dataset.enter);
+    }
+  });
+  window.addEventListener('keyup', e => {
+    if (e.key in keyToLane) release(keyToLane[e.key]);
+  });
+  // Keys released while the window is unfocused never send keyup
+  window.addEventListener('blur', () => lanes.forEach((_, i) => release(i)));
+
+  showMenu();
+})();
+</script>
+</body>
+</html>
